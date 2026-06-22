@@ -1,21 +1,21 @@
-/* ‚îÄ‚îÄ Reminder sender ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
+/* ── Reminder sender ─────────────────────────────────────────────────
    Runs on a schedule (GitHub Actions cron). Reads every user's synced
    doc, works out which reminders are due *in their local time*, and
    sends a Web Push to each of their devices.
 
    Reminders sent:
-     1. Subscriptions ‚Äî 1 week before AND 1 day before each renewal.
-     2. Habits        ‚Äî 30 minutes before the time you set, each day.
-     3. Monthly spend ‚Äî a report on the 1st: this past month vs the one before.
-     4. Work payday   ‚Äî every Tuesday a payment lands: your take-home + the week it covers.
+     1. Subscriptions — 1 week before AND 1 day before each renewal.
+     2. Habits        — 30 minutes before the time you set, each day.
+     3. Monthly spend — a report on the 1st: this past month vs the one before.
+     4. Work payday   — the day before, and on the day a payment lands: take-home + the week it covers.
 
    Dedup state lives in a SEPARATE `notifState/{uid}` doc so the app's
    normal writes to `sessions/{uid}` never wipe it.
 
    Env (provided as GitHub secrets):
-     FIREBASE_SERVICE_ACCOUNT  ‚Äì the service-account JSON (whole file)
-     VAPID_PRIVATE             ‚Äì the web-push VAPID private key
-‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ */
+     FIREBASE_SERVICE_ACCOUNT  – the service-account JSON (whole file)
+     VAPID_PRIVATE             – the web-push VAPID private key
+─────────────────────────────────────────────────────────────────── */
 
 import admin from 'firebase-admin'
 import webpush from 'web-push'
@@ -33,19 +33,19 @@ const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December']
 const MON_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
-/* ‚îÄ‚îÄ Currency (symbol only ‚Äî matches the app's display-currency setting) ‚îÄ‚îÄ */
+/* ── Currency (symbol only — matches the app's display-currency setting) ── */
 const CUR = {
   AUD: { s: 'A$', d: 2 }, USD: { s: 'US$', d: 2 }, NZD: { s: 'NZ$', d: 2 },
-  GBP: { s: '¬£', d: 2 }, EUR: { s: '‚Ç¨', d: 2 }, CAD: { s: 'C$', d: 2 },
-  SGD: { s: 'S$', d: 2 }, JPY: { s: '¬•', d: 0 }, INR: { s: '‚Çπ', d: 2 },
-  KHR: { s: '·üõ', d: 0 }, THB: { s: '‡∏ø', d: 2 }, CNY: { s: '¬•', d: 2 },
+  GBP: { s: '£', d: 2 }, EUR: { s: '€', d: 2 }, CAD: { s: 'C$', d: 2 },
+  SGD: { s: 'S$', d: 2 }, JPY: { s: '¥', d: 0 }, INR: { s: '₹', d: 2 },
+  KHR: { s: '៛', d: 0 }, THB: { s: '฿', d: 2 }, CNY: { s: '¥', d: 2 },
 }
 const money = (n, code) => {
   const c = CUR[code] || CUR.AUD
   return c.s + (Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: c.d, maximumFractionDigits: c.d })
 }
 
-/* ‚îÄ‚îÄ Date helpers (pure calendar math on YYYY-MM-DD, done in UTC) ‚îÄ‚îÄ */
+/* ── Date helpers (pure calendar math on YYYY-MM-DD, done in UTC) ── */
 const localNow = (tz) => {
   const fmt = new Intl.DateTimeFormat('en-CA', {
     timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
@@ -71,11 +71,11 @@ const fmtDay = (s) => { const d = parseYMD(s); return `${d.getUTCDate()} ${MON_A
 const fmtRange = (a, b) => {
   const da = parseYMD(a), dbb = parseYMD(b)
   if (da.getUTCMonth() === dbb.getUTCMonth())
-    return `${da.getUTCDate()}‚Äì${dbb.getUTCDate()} ${MON_ABBR[da.getUTCMonth()]}`
-  return `${fmtDay(a)} ‚Äì ${fmtDay(b)}`
+    return `${da.getUTCDate()}–${dbb.getUTCDate()} ${MON_ABBR[da.getUTCMonth()]}`
+  return `${fmtDay(a)} – ${fmtDay(b)}`
 }
 
-/* ‚îÄ‚îÄ Australian PAYG weekly tax (ported from the app's auTax.js) ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ */
+/* ── Australian PAYG weekly tax (ported from the app's auTax.js) ────── */
 const SCALE_2 = [ // tax-free threshold claimed, full Medicare
   { under: 361, a: 0, b: 0 }, { under: 500, a: 0.16, b: 57.8462 },
   { under: 625, a: 0.26, b: 107.8462 }, { under: 721, a: 0.18, b: 57.8462 },
@@ -124,7 +124,7 @@ const weeklyTaxAmount = (gross, ws) => {
 }
 const weeklyNet = (gross, ws) => Math.max(0, gross - weeklyTaxAmount(gross, ws))
 
-/* ‚îÄ‚îÄ Work week grouping (Mon‚ÄìSun; payday = ported from workData.js) ‚îÄ‚îÄ */
+/* ── Work week grouping (Mon–Sun; payday = ported from workData.js) ── */
 const weekStartOf = (dateStr) => {
   const d = parseYMD(dateStr), dow = d.getUTCDay()
   d.setUTCDate(d.getUTCDate() - (dow === 0 ? 6 : dow - 1)) // back to Monday
@@ -135,7 +135,7 @@ const entryGross = (e, hourlyRate) =>
   e.kind === 'piece' ? (Number(e.trees) || 0) * (Number(e.ratePerTree) || 0)
                      : (Number(e.hours) || 0) * (Number(hourlyRate) || 0)
 
-/* ‚îÄ‚îÄ Monthly spend (ported from review.js: charges in month + daily) ‚îÄ‚îÄ */
+/* ── Monthly spend (ported from review.js: charges in month + daily) ── */
 const monthSpend = (items, daily, y, m) => {
   const key = monthKey(y, m)
   let total = 0
@@ -179,19 +179,19 @@ async function run() {
     const queue = []
     const add = (key, title, body) => { if (!sent.has(key)) queue.push({ key, title, body, tag: key }) }
 
-    /* 1. Subscriptions ‚Äî 1 week before AND 1 day before (from 9am local) */
+    /* 1. Subscriptions — 1 week before AND 1 day before (from 9am local) */
     if (now.minutes >= 540) {
       for (const it of (d.subscriptions || [])) {
         if (it.type !== 'subscription' || it.status !== 'active' || !it.nextRenewalDate) continue
         const du = daysBetween(now.date, it.nextRenewalDate)
         if (du === 7) add(`sub7:${it.id}:${now.date}`,
-          `üí≥ ${it.name} renews in 1 week`, `${money(it.amount, code)} on ${fmtDay(it.nextRenewalDate)}.`)
+          `💳 ${it.name} renews in 1 week`, `${money(it.amount, code)} on ${fmtDay(it.nextRenewalDate)}.`)
         if (du === 1) add(`sub1:${it.id}:${now.date}`,
-          `üí≥ ${it.name} renews tomorrow`, `${money(it.amount, code)} on ${fmtDay(it.nextRenewalDate)}.`)
+          `💳 ${it.name} renews tomorrow`, `${money(it.amount, code)} on ${fmtDay(it.nextRenewalDate)}.`)
       }
     }
 
-    /* 2. Habits ‚Äî 30 minutes before the set time, on scheduled days, if not done */
+    /* 2. Habits — 30 minutes before the set time, on scheduled days, if not done */
     for (const h of (d.habits || [])) {
       if (!h.reminderTime) continue
       if (!(h.days || [0, 1, 2, 3, 4, 5, 6]).includes(now.weekday)) continue
@@ -200,10 +200,10 @@ async function run() {
       const start = hh * 60 + mm
       const fireFrom = Math.max(0, start - 30)
       if (now.minutes >= fireFrom && now.minutes < start)
-        add(`habit:${h.id}:${now.date}`, `${h.emoji || '‚è∞'} ${h.name} in 30 min`, `Starts at ${h.reminderTime}.`)
+        add(`habit:${h.id}:${now.date}`, `${h.emoji || '⏰'} ${h.name} in 30 min`, `Starts at ${h.reminderTime}.`)
     }
 
-    /* 3. Monthly spend report ‚Äî on the 1st, from 9am: last month vs the one before */
+    /* 3. Monthly spend report — on the 1st, from 9am: last month vs the one before */
     if (now.day === 1 && now.minutes >= 540) {
       const lm = { y: now.month === 0 ? now.year - 1 : now.year, m: now.month === 0 ? 11 : now.month - 1 }
       const bm = { y: lm.m === 0 ? lm.y - 1 : lm.y, m: lm.m === 0 ? 11 : lm.m - 1 }
@@ -213,19 +213,20 @@ async function run() {
         let cmp = '.'
         if (prev > 0) {
           const diff = Math.round((last - prev) / prev * 100)
-          cmp = diff === 0 ? ` ‚Äî same as ${MONTHS[bm.m]}.`
-            : ` ‚Äî ${Math.abs(diff)}% ${diff > 0 ? 'more' : 'less'} than ${MONTHS[bm.m]}.`
+          cmp = diff === 0 ? ` — same as ${MONTHS[bm.m]}.`
+            : ` — ${Math.abs(diff)}% ${diff > 0 ? 'more' : 'less'} than ${MONTHS[bm.m]}.`
         }
-        add(`report:${monthKey(lm.y, lm.m)}`, `üìä ${MONTHS[lm.m]} spending`,
+        add(`report:${monthKey(lm.y, lm.m)}`, `📊 ${MONTHS[lm.m]} spending`,
           `You spent ${money(last, code)}${cmp}`)
       }
     }
 
-    /* 4. Work payday ‚Äî every Tuesday a week's pay lands (from 9am local) */
-    if (now.weekday === 2 && now.minutes >= 540) {
+    /* 4. Work payday — a heads-up the day before, and on the day it lands (9am local) */
+    if (now.minutes >= 540) {
       const ws = d.workSettings || {}
       const delay = ws.payDelayWeeks ?? 1
       const rate = Number(ws.hourlyRate) || 0
+      const tomorrow = addDays(now.date, 1)
       const weeks = {}
       for (const e of (d.workEntries || [])) {
         if (!e?.date) continue
@@ -233,12 +234,18 @@ async function run() {
         ;(weeks[k] || (weeks[k] = [])).push(e)
       }
       for (const k of Object.keys(weeks)) {
-        if (paydayOf(k, delay) !== now.date) continue
+        const payday = paydayOf(k, delay)
+        const isToday = payday === now.date
+        const isTomorrow = payday === tomorrow
+        if (!isToday && !isTomorrow) continue
         const gross = weeks[k].reduce((s, e) => s + entryGross(e, rate), 0)
         if (gross <= 0) continue
         const net = weeklyNet(gross, ws)
-        add(`payday:${k}`, `üí∞ Payday ‚Äî ${money(net, code)}`,
-          `Take-home for ${fmtRange(k, addDays(k, 6))}.`)
+        const range = fmtRange(k, addDays(k, 6))
+        if (isTomorrow)
+          add(`payday-eve:${k}`, `💰 Payday tomorrow — ${money(net, code)}`, `For ${range}, landing tomorrow.`)
+        if (isToday)
+          add(`payday:${k}`, `💰 Payday — ${money(net, code)}`, `Take-home for ${range}.`)
       }
     }
 
@@ -253,7 +260,7 @@ async function run() {
       sent.add(msg.key)
     }
 
-    // Prune day-stamped dedup keys older than ~5 days (month/report keys have no day ‚Üí kept).
+    // Prune day-stamped dedup keys older than ~5 days (month/report keys have no day → kept).
     const cutoff = new Date(Date.now() - 5 * 86400000).toISOString().slice(0, 10)
     const pruned = [...sent].filter(k => { const m = k.match(/:(\d{4}-\d{2}-\d{2})$/); return !m || m[1] >= cutoff })
     await stateRef.set({ sent: pruned, updatedAt: new Date().toISOString() })
