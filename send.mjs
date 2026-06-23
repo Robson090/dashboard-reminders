@@ -130,10 +130,47 @@ const weekStartOf = (dateStr) => {
   d.setUTCDate(d.getUTCDate() - (dow === 0 ? 6 : dow - 1)) // back to Monday
   return ymd(d)
 }
-const paydayOf = (weekStart, delay) => addDays(weekStart, 8 + 7 * (delay ?? 1))
+// Payday = chosen weekday (0=Sun..6=Sat, default Tue) in the week after the
+// work week, pushed out by `delay` whole weeks. Mirrors workData.getPayday.
+const paydayOf = (weekStart, delay, payWeekday = 2) =>
+  addDays(weekStart, 6 + (payWeekday === 0 ? 7 : payWeekday) + 7 * (delay ?? 1))
 const entryGross = (e, hourlyRate) =>
   e.kind === 'piece' ? (Number(e.trees) || 0) * (Number(e.ratePerTree) || 0)
                      : (Number(e.hours) || 0) * (Number(hourlyRate) || 0)
+
+// Exact hours between two "HH:MM" times, minus 30 min for lunch. (← WorkModal)
+const calcHoursFromTimes = (start, end, lunch) => {
+  if (!start || !end) return 0
+  const [sh, sm] = start.split(':').map(Number)
+  const [eh, em] = end.split(':').map(Number)
+  let mins = (eh * 60 + em) - (sh * 60 + sm)
+  if (mins <= 0) return 0
+  if (lunch) mins -= 30
+  return mins > 0 ? mins / 60 : 0
+}
+
+// Fixed-roster users log nothing — regenerate their scheduled entries (weeks
+// from startWeek to the current week) so payday still fires. Mirrors WorkHours.
+const scheduleEntries = (sched, workEntries, todayDate) => {
+  if (!sched?.enabled || !sched.startWeek) return []
+  const skips       = new Set(sched.skips || [])
+  const manualDates = new Set((workEntries || []).map(e => e.date))
+  const out = []
+  const endMon = weekStartOf(todayDate)
+  let cur = weekStartOf(sched.startWeek), guard = 0
+  while (cur <= endMon && guard++ < 520) {
+    for (let off = 0; off < 7; off++) {
+      const ds = addDays(cur, off)
+      if (manualDates.has(ds) || skips.has(ds)) continue
+      const day = sched.days?.[weekdayOf(ds)]
+      if (!day?.on || !day.start || !day.end) continue
+      const h = calcHoursFromTimes(day.start, day.end, day.lunch)
+      if (h > 0) out.push({ date: ds, kind: 'hours', hours: h })
+    }
+    cur = addDays(cur, 7)
+  }
+  return out
+}
 
 /* ── Monthly spend (ported from review.js: charges in month + daily) ── */
 const monthSpend = (items, daily, y, m) => {
@@ -225,16 +262,19 @@ async function run() {
     if (now.minutes >= 540) {
       const ws = d.workSettings || {}
       const delay = ws.payDelayWeeks ?? 1
+      const payWeekday = ws.payWeekday ?? 2
       const rate = Number(ws.hourlyRate) || 0
       const tomorrow = addDays(now.date, 1)
+      // manual entries + any fixed-roster entries the user never logs
+      const allEntries = [...(d.workEntries || []), ...scheduleEntries(ws.schedule, d.workEntries, now.date)]
       const weeks = {}
-      for (const e of (d.workEntries || [])) {
+      for (const e of allEntries) {
         if (!e?.date) continue
         const k = weekStartOf(e.date)
         ;(weeks[k] || (weeks[k] = [])).push(e)
       }
       for (const k of Object.keys(weeks)) {
-        const payday = paydayOf(k, delay)
+        const payday = paydayOf(k, delay, payWeekday)
         const isToday = payday === now.date
         const isTomorrow = payday === tomorrow
         if (!isToday && !isTomorrow) continue
