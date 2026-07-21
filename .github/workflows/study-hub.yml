@@ -1,0 +1,22 @@
+name: Study hub assessment reminders
+# Separate from notify.yml: assessment deadlines only need a daily nudge, and
+# keeping the workflows apart means this can't affect the dashboard reminders.
+on:
+  schedule:
+    # 22:00 UTC = 8am Melbourne (AEST). Shifts to 9am over daylight saving,
+    # which is fine for a morning reminder.
+    - cron: '0 22 * * *'
+  workflow_dispatch: {}
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install web-push firebase-admin
+      - run: node study-hub.mjs
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          VAPID_PRIVATE: ${{ secrets.VAPID_PRIVATE }}
