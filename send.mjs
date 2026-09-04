@@ -33,6 +33,11 @@ const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December']
 const MON_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
+/* ~7s "ring-ring" buzz for time-critical alerts (habit reminders).
+   Alternating vibrate/pause ms. Android may fall back to its channel
+   default if the user's notification channel overrides patterns.      */
+const RING = [400, 200, 400, 800, 400, 200, 400, 800, 400, 200, 400, 800, 400, 200, 400, 800]
+
 /* ── Currency (symbol only — matches the app's display-currency setting) ── */
 const CUR = {
   AUD: { s: 'A$', d: 2 }, USD: { s: 'US$', d: 2 }, NZD: { s: 'NZ$', d: 2 },
@@ -214,7 +219,7 @@ async function run() {
     const stateRef = db.collection('notifState').doc(uid)
     const sent = new Set((((await stateRef.get()).data() || {}).sent) || [])
     const queue = []
-    const add = (key, title, body) => { if (!sent.has(key)) queue.push({ key, title, body, tag: key }) }
+    const add = (key, title, body, opts = {}) => { if (!sent.has(key)) queue.push({ key, title, body, tag: key, ...opts }) }
 
     /* 1. Subscriptions — 1 week before AND 1 day before (from 9am local) */
     if (now.minutes >= 540) {
@@ -237,7 +242,7 @@ async function run() {
       const start = hh * 60 + mm
       const fireFrom = Math.max(0, start - 30)
       if (now.minutes >= fireFrom && now.minutes < start)
-        add(`habit:${h.id}:${now.date}`, `${h.emoji || '⏰'} ${h.name} in 30 min`, `Starts at ${h.reminderTime}.`)
+        add(`habit:${h.id}:${now.date}`, `${h.emoji || '⏰'} ${h.name} in 30 min`, `Starts at ${h.reminderTime}.`, { alarm: true })
     }
 
     /* 3. Monthly spend report — on the 1st, from 9am: last month vs the one before */
@@ -292,7 +297,10 @@ async function run() {
     if (!queue.length) continue
 
     for (const msg of queue) {
-      const payload = JSON.stringify({ title: msg.title, body: msg.body, tag: msg.tag, url: '/' })
+      const payload = JSON.stringify({
+        title: msg.title, body: msg.body, tag: msg.tag, url: '/',
+        ...(msg.alarm ? { vibrate: RING, requireInteraction: true } : {}),
+      })
       for (const s of subs) {
         try { await webpush.sendNotification({ endpoint: s.endpoint, keys: s.keys }, payload); sentTotal++ }
         catch (e) { if (![404, 410].includes(e.statusCode)) console.error('push error', uid, e.statusCode || e.message) }
